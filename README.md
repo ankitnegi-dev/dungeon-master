@@ -10,11 +10,11 @@ An immersive, dark-themed AI-powered text adventure game built with **Next.js 16
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 ---
-
 ## 🎮 Live Demo
 
-> Deploy your own in one click → [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new)
+🔗 **[Play Live →](https://dungeon-master-kappa.vercel.app)**
 
+> Deploy your own → [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new)
 ---
 
 ## ✨ Features
