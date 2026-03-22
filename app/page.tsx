@@ -221,7 +221,7 @@ export default function DungeonMaster() {
       .camera-corner-br { position: absolute; bottom: 8px; right: 8px; width: 20px; height: 20px; border-bottom: 2px solid var(--gold); border-right: 2px solid var(--gold); }
     `;
     document.head.appendChild(style);
-    return () => document.head.removeChild(style);
+    return () => { document.head.removeChild(style); };
   }, []);
 
   const generateScene = async (prompt: string) => {
