@@ -29,6 +29,11 @@ export default function DungeonMaster() {
     location: "Unknown",
     inventory: [],
   });
+
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const ambientNodesRef = useRef<any[]>([]);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const listeningRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -605,6 +610,261 @@ export default function DungeonMaster() {
     localStorage.removeItem("dungeon-master-session");
   };
 
+  const initAudio = () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (
+        window.AudioContext || (window as any).webkitAudioContext
+      )();
+    }
+    return audioCtxRef.current;
+  };
+
+  const stopAmbient = () => {
+    ambientNodesRef.current.forEach((node) => {
+      try {
+        node.stop();
+      } catch (e) {}
+    });
+    ambientNodesRef.current = [];
+  };
+
+  const playAmbient = (currentWorld: string) => {
+    const ctx = initAudio();
+    stopAmbient();
+    if (currentWorld === "fantasy") {
+      // Tavern ambience — low rumble + crackling fire
+      const rumble = ctx.createOscillator();
+      const rumbleGain = ctx.createGain();
+      rumble.type = "sine";
+      rumble.frequency.value = 55;
+      rumbleGain.gain.value = 0.04;
+      rumble.connect(rumbleGain);
+      rumbleGain.connect(ctx.destination);
+      rumble.start();
+      ambientNodesRef.current.push(rumble);
+      // Fire crackle using noise
+      const bufferSize = ctx.sampleRate * 2;
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.015;
+      }
+      const fireNoise = ctx.createBufferSource();
+      fireNoise.buffer = noiseBuffer;
+      fireNoise.loop = true;
+      const fireFilter = ctx.createBiquadFilter();
+      fireFilter.type = "bandpass";
+      fireFilter.frequency.value = 800;
+      fireFilter.Q.value = 0.5;
+      const fireGain = ctx.createGain();
+      fireGain.gain.value = 0.3;
+      fireNoise.connect(fireFilter);
+      fireFilter.connect(fireGain);
+      fireGain.connect(ctx.destination);
+      fireNoise.start();
+      ambientNodesRef.current.push(fireNoise);
+      // Distant murmur
+      const murmur = ctx.createOscillator();
+      const murmurGain = ctx.createGain();
+      murmur.type = "sine";
+      murmur.frequency.value = 180;
+      murmurGain.gain.value = 0.015;
+      murmur.connect(murmurGain);
+      murmurGain.connect(ctx.destination);
+      murmur.start();
+      ambientNodesRef.current.push(murmur);
+    } else if (currentWorld === "scifi") {
+      // Spaceship hum
+      const hum = ctx.createOscillator();
+      const humGain = ctx.createGain();
+      hum.type = "sawtooth";
+      hum.frequency.value = 60;
+      humGain.gain.value = 0.03;
+      const humFilter = ctx.createBiquadFilter();
+      humFilter.type = "lowpass";
+      humFilter.frequency.value = 200;
+      hum.connect(humFilter);
+      humFilter.connect(humGain);
+      humGain.connect(ctx.destination);
+      hum.start();
+      ambientNodesRef.current.push(hum);
+      // Electronic beeps
+      const beep = ctx.createOscillator();
+      const beepGain = ctx.createGain();
+      beep.type = "sine";
+      beep.frequency.value = 440;
+      beepGain.gain.value = 0;
+      beep.connect(beepGain);
+      beepGain.connect(ctx.destination);
+      beep.start();
+      ambientNodesRef.current.push(beep);
+      // Pulse the beep every 3 seconds
+      const beepInterval = setInterval(() => {
+        if (!audioCtxRef.current) return;
+        beepGain.gain.setValueAtTime(0.06, ctx.currentTime);
+        beepGain.gain.exponentialRampToValueAtTime(
+          0.001,
+          ctx.currentTime + 0.1,
+        );
+      }, 3000);
+      ambientNodesRef.current.push({ stop: () => clearInterval(beepInterval) });
+      // Static noise
+      const staticBuffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const staticData = staticBuffer.getChannelData(0);
+      for (let i = 0; i < ctx.sampleRate; i++)
+        staticData[i] = (Math.random() * 2 - 1) * 0.01;
+      const staticSource = ctx.createBufferSource();
+      staticSource.buffer = staticBuffer;
+      staticSource.loop = true;
+      const staticGain = ctx.createGain();
+      staticGain.gain.value = 0.15;
+      staticSource.connect(staticGain);
+      staticGain.connect(ctx.destination);
+      staticSource.start();
+      ambientNodesRef.current.push(staticSource);
+    } else if (currentWorld === "horror") {
+      // Deep drone — unsettling
+      const drone = ctx.createOscillator();
+      const droneGain = ctx.createGain();
+      drone.type = "sawtooth";
+      drone.frequency.value = 40;
+      droneGain.gain.value = 0.05;
+      const droneFilter = ctx.createBiquadFilter();
+      droneFilter.type = "lowpass";
+      droneFilter.frequency.value = 150;
+      drone.connect(droneFilter);
+      droneFilter.connect(droneGain);
+      droneGain.connect(ctx.destination);
+      drone.start();
+      ambientNodesRef.current.push(drone);
+      // Slow LFO on the drone for an eerie pulse
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 0.15;
+      lfoGain.gain.value = 0.03;
+      lfo.connect(lfoGain);
+      lfoGain.connect(droneGain.gain);
+      lfo.start();
+      ambientNodesRef.current.push(lfo);
+      // Wind howl
+      const windBuffer = ctx.createBuffer(
+        1,
+        ctx.sampleRate * 2,
+        ctx.sampleRate,
+      );
+      const windData = windBuffer.getChannelData(0);
+      for (let i = 0; i < windData.length; i++)
+        windData[i] = Math.random() * 2 - 1;
+      const windSource = ctx.createBufferSource();
+      windSource.buffer = windBuffer;
+      windSource.loop = true;
+      const windFilter = ctx.createBiquadFilter();
+      windFilter.type = "bandpass";
+      windFilter.frequency.value = 300;
+      windFilter.Q.value = 0.3;
+      const windGain = ctx.createGain();
+      windGain.gain.value = 0.08;
+      windSource.connect(windFilter);
+      windFilter.connect(windGain);
+      windGain.connect(ctx.destination);
+      windSource.start();
+      ambientNodesRef.current.push(windSource);
+    } else if (currentWorld === "samurai") {
+      // Gentle wind through bamboo
+      const windBuffer = ctx.createBuffer(
+        1,
+        ctx.sampleRate * 2,
+        ctx.sampleRate,
+      );
+      const windData = windBuffer.getChannelData(0);
+      for (let i = 0; i < windData.length; i++)
+        windData[i] = (Math.random() * 2 - 1) * 0.5;
+      const windSource = ctx.createBufferSource();
+      windSource.buffer = windBuffer;
+      windSource.loop = true;
+      const windFilter = ctx.createBiquadFilter();
+      windFilter.type = "highpass";
+      windFilter.frequency.value = 1200;
+      const windGain = ctx.createGain();
+      windGain.gain.value = 0.04;
+      windSource.connect(windFilter);
+      windFilter.connect(windGain);
+      windGain.connect(ctx.destination);
+      windSource.start();
+      ambientNodesRef.current.push(windSource);
+      // Crickets — high frequency pulse
+      const cricket = ctx.createOscillator();
+      const cricketGain = ctx.createGain();
+      cricket.type = "sine";
+      cricket.frequency.value = 3200;
+      cricketGain.gain.value = 0;
+      cricket.connect(cricketGain);
+      cricketGain.connect(ctx.destination);
+      cricket.start();
+      ambientNodesRef.current.push(cricket);
+      const cricketInterval = setInterval(
+        () => {
+          if (!audioCtxRef.current) return;
+          for (let i = 0; i < 3; i++) {
+            cricketGain.gain.setValueAtTime(0.02, ctx.currentTime + i * 0.08);
+            cricketGain.gain.setValueAtTime(
+              0,
+              ctx.currentTime + i * 0.08 + 0.04,
+            );
+          }
+        },
+        2000 + Math.random() * 1000,
+      );
+      ambientNodesRef.current.push({
+        stop: () => clearInterval(cricketInterval),
+      });
+    }
+  };
+
+  const playCombatSound = () => {
+    const ctx = initAudio();
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(200, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.3);
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  };
+
+  const playItemSound = () => {
+    const ctx = initAudio();
+    [0, 0.1, 0.2].forEach((delay, i) => {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = [523, 659, 784][i];
+      gainNode.gain.setValueAtTime(0.15, ctx.currentTime + delay);
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.001,
+        ctx.currentTime + delay + 0.3,
+      );
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.3);
+    });
+  };
+
+  const toggleSound = () => {
+    if (soundEnabled) {
+      stopAmbient();
+      setSoundEnabled(false);
+    } else {
+      setSoundEnabled(true);
+      playAmbient(world);
+    }
+  };
+
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
     setInput("");
@@ -649,6 +909,38 @@ export default function DungeonMaster() {
           if (data.done) {
             setLoading(false);
             if (dmText) speakNarration(dmText);
+            // Play contextual sounds
+            if (soundEnabled) {
+              const lower = dmText.toLowerCase();
+              const combatWords = [
+                "attack",
+                "strike",
+                "blade",
+                "sword",
+                "fight",
+                "slash",
+                "stab",
+                "wound",
+                "blood",
+                "battle",
+                "combat",
+                "dodge",
+                "parry",
+              ];
+              const itemWords = [
+                "found",
+                "discover",
+                "pick up",
+                "collect",
+                "obtain",
+                "acquire",
+                "receive",
+                "given",
+              ];
+              if (combatWords.some((w) => lower.includes(w))) playCombatSound();
+              else if (itemWords.some((w) => lower.includes(w)))
+                playItemSound();
+            }
             setMessages((prev) => {
               saveSession(prev, stats, world, sceneImage);
               return prev;
@@ -673,6 +965,7 @@ export default function DungeonMaster() {
 
   const startAdventure = () => {
     setStarted(true);
+    if (soundEnabled) playAmbient(world);
     sendMessage("Begin the adventure.");
   };
   const healthColor =
@@ -788,6 +1081,25 @@ export default function DungeonMaster() {
                 SAVED
               </span>
             </div>
+          )}
+          {started && (
+            <button
+              onClick={toggleSound}
+              className={soundEnabled ? "act-btn" : "mic-btn"}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "4px",
+                fontSize: "11px",
+                letterSpacing: "0.1em",
+                border: "1px solid",
+                fontFamily: "Cinzel, serif",
+              }}
+              title={
+                soundEnabled ? "Mute ambient sound" : "Enable ambient sound"
+              }
+            >
+              {soundEnabled ? "🔊 SOUND" : "🔇 SOUND"}
+            </button>
           )}
           {started && (
             <button
@@ -937,6 +1249,8 @@ export default function DungeonMaster() {
                                 setSceneImage(savedSession.sceneImage);
                                 setStarted(true);
                                 setSavedSession(null);
+                                if (soundEnabled)
+                                  playAmbient(savedSession.world);
                               }}
                               className="act-btn"
                               style={{
