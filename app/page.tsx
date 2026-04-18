@@ -11,6 +11,14 @@ type Stats = {
 };
 
 export default function DungeonMaster() {
+  // Step 1: Character states
+  const [character, setCharacter] = useState<{
+    name: string;
+    characterClass: string;
+  } | null>(null);
+  const [charName, setCharName] = useState("");
+  const [charClass, setCharClass] = useState("");
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -871,11 +879,14 @@ export default function DungeonMaster() {
     setLoading(true);
     const history = messages.slice(-12);
     setMessages((prev) => [...prev, { role: "player", text }]);
+
+    // Step 2: Added character to JSON stringify body
     const res = await fetch("/api/gemini-proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, history, world }),
+      body: JSON.stringify({ message: text, history, world, character }),
     });
+
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let dmText = "";
@@ -1050,6 +1061,7 @@ export default function DungeonMaster() {
                 letterSpacing: "0.08em",
               }}
             >
+              {character ? `${character.name} · ` : ""}
               {stats.location}
             </span>
           </div>
@@ -1135,6 +1147,9 @@ export default function DungeonMaster() {
                     location: "Unknown",
                     inventory: [],
                   });
+                  setCharacter(null);
+                  setCharName("");
+                  setCharClass("");
                 }
               }}
               className="mic-btn"
@@ -1411,9 +1426,9 @@ export default function DungeonMaster() {
                         ))}
                       </div>
                     </>
-                  ) : (
+                  ) : !character ? (
                     <>
-                      <div style={{ fontSize: "60px" }}>
+                      <div style={{ fontSize: "50px", marginBottom: "4px" }}>
                         {world === "fantasy"
                           ? "⚔️"
                           : world === "scifi"
@@ -1425,18 +1440,312 @@ export default function DungeonMaster() {
                       <div style={{ textAlign: "center" }}>
                         <h2
                           className="font-display"
-                          style={{ fontSize: "22px", marginBottom: "8px" }}
+                          style={{ fontSize: "20px", marginBottom: "6px" }}
                         >
                           <span className="title-shimmer">
-                            {world === "fantasy"
-                              ? "Dark Fantasy"
-                              : world === "scifi"
-                                ? "Space Opera"
-                                : world === "horror"
-                                  ? "Cosmic Horror"
-                                  : "Feudal Japan"}
+                            Create Your Character
                           </span>
                         </h2>
+                        <p
+                          className="font-body"
+                          style={{
+                            color: "var(--text-secondary)",
+                            fontSize: "15px",
+                          }}
+                        >
+                          The DM will address you by name and honour your
+                          abilities.
+                        </p>
+                      </div>
+                      {/* Name input */}
+                      <div style={{ width: "100%", maxWidth: "400px" }}>
+                        <p
+                          style={{
+                            fontFamily: "Cinzel, serif",
+                            fontSize: "10px",
+                            color: "var(--gold-dim)",
+                            letterSpacing: "0.15em",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          YOUR NAME
+                        </p>
+                        <input
+                          type="text"
+                          value={charName}
+                          onChange={(e) => setCharName(e.target.value)}
+                          onKeyDown={(e) =>
+                            e.key === "Enter" &&
+                            charName.trim() &&
+                            charClass &&
+                            setCharacter({
+                              name: charName.trim(),
+                              characterClass: charClass,
+                            })
+                          }
+                          placeholder={
+                            world === "fantasy"
+                              ? "e.g. Aldric, Seraphina..."
+                              : world === "scifi"
+                                ? "e.g. Kira, Zane..."
+                                : world === "horror"
+                                  ? "e.g. Edmund, Clara..."
+                                  : "e.g. Kenji, Hana..."
+                          }
+                          className="input-field"
+                          style={{
+                            width: "100%",
+                            padding: "12px 16px",
+                            borderRadius: "6px",
+                            fontSize: "16px",
+                          }}
+                          autoFocus
+                        />
+                      </div>
+                      {/* Class selection */}
+                      <div style={{ width: "100%", maxWidth: "400px" }}>
+                        <p
+                          style={{
+                            fontFamily: "Cinzel, serif",
+                            fontSize: "10px",
+                            color: "var(--gold-dim)",
+                            letterSpacing: "0.15em",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          YOUR CLASS
+                        </p>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: "8px",
+                          }}
+                        >
+                          {(world === "fantasy"
+                            ? [
+                                {
+                                  id: "Warrior",
+                                  icon: "⚔️",
+                                  desc: "Strength & combat",
+                                },
+                                {
+                                  id: "Mage",
+                                  icon: "✨",
+                                  desc: "Spells & arcane power",
+                                },
+                                {
+                                  id: "Rogue",
+                                  icon: "🗡️",
+                                  desc: "Stealth & cunning",
+                                },
+                                {
+                                  id: "Ranger",
+                                  icon: "🏹",
+                                  desc: "Nature & tracking",
+                                },
+                              ]
+                            : world === "scifi"
+                              ? [
+                                  {
+                                    id: "Soldier",
+                                    icon: "🔫",
+                                    desc: "Combat & tactics",
+                                  },
+                                  {
+                                    id: "Hacker",
+                                    icon: "💻",
+                                    desc: "Tech & infiltration",
+                                  },
+                                  {
+                                    id: "Pilot",
+                                    icon: "🚀",
+                                    desc: "Navigation & speed",
+                                  },
+                                  {
+                                    id: "Medic",
+                                    icon: "💉",
+                                    desc: "Healing & support",
+                                  },
+                                ]
+                              : world === "horror"
+                                ? [
+                                    {
+                                      id: "Detective",
+                                      icon: "🔍",
+                                      desc: "Investigation & deduction",
+                                    },
+                                    {
+                                      id: "Occultist",
+                                      icon: "📖",
+                                      desc: "Dark knowledge",
+                                    },
+                                    {
+                                      id: "Soldier",
+                                      icon: "🔫",
+                                      desc: "Combat & survival",
+                                    },
+                                    {
+                                      id: "Empath",
+                                      icon: "👁️",
+                                      desc: "Senses the unseen",
+                                    },
+                                  ]
+                                : [
+                                    {
+                                      id: "Samurai",
+                                      icon: "⚔️",
+                                      desc: "Honor & the blade",
+                                    },
+                                    {
+                                      id: "Ninja",
+                                      icon: "🌑",
+                                      desc: "Shadow & deception",
+                                    },
+                                    {
+                                      id: "Monk",
+                                      icon: "☯️",
+                                      desc: "Spirit & discipline",
+                                    },
+                                    {
+                                      id: "Archer",
+                                      icon: "🏹",
+                                      desc: "Precision & patience",
+                                    },
+                                  ]
+                          ).map((cls) => (
+                            <button
+                              key={cls.id}
+                              onClick={() => setCharClass(cls.id)}
+                              style={{
+                                background:
+                                  charClass === cls.id
+                                    ? "rgba(201,148,58,0.15)"
+                                    : "rgba(201,148,58,0.03)",
+                                border:
+                                  charClass === cls.id
+                                    ? "1px solid var(--gold)"
+                                    : "1px solid rgba(201,148,58,0.2)",
+                                borderRadius: "6px",
+                                padding: "12px",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                transition: "all 0.2s",
+                                boxShadow:
+                                  charClass === cls.id
+                                    ? "0 0 16px rgba(201,148,58,0.2)"
+                                    : "none",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: "20px",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                {cls.icon}
+                              </div>
+                              <p
+                                style={{
+                                  fontFamily: "Cinzel, serif",
+                                  fontSize: "12px",
+                                  color:
+                                    charClass === cls.id
+                                      ? "var(--gold)"
+                                      : "var(--text-secondary)",
+                                  marginBottom: "2px",
+                                }}
+                              >
+                                {cls.id}
+                              </p>
+                              <p
+                                style={{
+                                  fontFamily: "EB Garamond, serif",
+                                  fontSize: "12px",
+                                  color: "var(--text-dim)",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                {cls.desc}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: "10px" }}>
+                        <button
+                          onClick={() => {
+                            if (charName.trim() && charClass) {
+                              setCharacter({
+                                name: charName.trim(),
+                                characterClass: charClass,
+                              });
+                            }
+                          }}
+                          disabled={!charName.trim() || !charClass}
+                          className="act-btn"
+                          style={{
+                            padding: "12px 32px",
+                            borderRadius: "4px",
+                            fontSize: "13px",
+                            letterSpacing: "0.15em",
+                          }}
+                        >
+                          FORGE MY DESTINY
+                        </button>
+                        <button
+                          onClick={() => setWorld("")}
+                          className="mic-btn"
+                          style={{
+                            padding: "12px 18px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            border: "1px solid",
+                            fontFamily: "Cinzel, serif",
+                          }}
+                        >
+                          BACK
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: "56px" }}>
+                        {world === "fantasy"
+                          ? "⚔️"
+                          : world === "scifi"
+                            ? "🚀"
+                            : world === "horror"
+                              ? "🕯️"
+                              : "🗡️"}
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <h2
+                          className="font-display"
+                          style={{ fontSize: "22px", marginBottom: "6px" }}
+                        >
+                          <span className="title-shimmer">
+                            {character?.name}
+                          </span>
+                        </h2>
+                        <p
+                          style={{
+                            fontFamily: "Cinzel, serif",
+                            fontSize: "12px",
+                            color: "var(--gold-dim)",
+                            letterSpacing: "0.12em",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          {character?.characterClass} ·{" "}
+                          {world === "fantasy"
+                            ? "Dark Fantasy"
+                            : world === "scifi"
+                              ? "Space Opera"
+                              : world === "horror"
+                                ? "Cosmic Horror"
+                                : "Feudal Japan"}
+                        </p>
                         <p
                           className="font-body"
                           style={{
@@ -1447,13 +1756,13 @@ export default function DungeonMaster() {
                           }}
                         >
                           {world === "fantasy" &&
-                            "A world of shadows and sorcery awaits. Ancient evil stirs in the darkness."}
+                            `The ${character?.characterClass}'s path leads into darkness. Steel yourself.`}
                           {world === "scifi" &&
-                            "The galaxy holds no mercy. Your story begins at the edge of known space."}
+                            `${character?.characterClass} skills engaged. The galaxy awaits.`}
                           {world === "horror" &&
-                            "Something watches from beyond the veil. Your sanity is your only shield."}
+                            `A ${character?.characterClass} in a world of madness. Good luck.`}
                           {world === "samurai" &&
-                            "The way of the sword demands everything. Honor is your only currency."}
+                            `The ${character?.characterClass}'s journey begins at moonrise.`}
                         </p>
                       </div>
                       <div style={{ display: "flex", gap: "12px" }}>
@@ -1467,18 +1776,17 @@ export default function DungeonMaster() {
                             letterSpacing: "0.15em",
                           }}
                         >
-                          ENTER THE REALM
+                          BEGIN THE LEGEND
                         </button>
                         <button
-                          onClick={() => setWorld("")}
+                          onClick={() => setCharacter(null)}
                           className="mic-btn"
                           style={{
-                            padding: "14px 20px",
+                            padding: "14px 18px",
                             borderRadius: "4px",
-                            fontSize: "13px",
+                            fontSize: "12px",
                             border: "1px solid",
                             fontFamily: "Cinzel, serif",
-                            letterSpacing: "0.1em",
                           }}
                         >
                           BACK
