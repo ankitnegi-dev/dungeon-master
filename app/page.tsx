@@ -45,6 +45,11 @@ export default function DungeonMaster() {
   const [diceRolling, setDiceRolling] = useState(false);
   const [diceVisible, setDiceVisible] = useState(false);
 
+  // Step 1 — Add map state
+  const [visitedLocations, setVisitedLocations] = useState<
+    { name: string; x: number; y: number; current: boolean }[]
+  >([]);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
   const ambientNodesRef = useRef<any[]>([]);
 
@@ -63,6 +68,31 @@ export default function DungeonMaster() {
       setSavedSession(session);
     }
   }, []);
+
+  // Step 2 — Auto-update map when location changes
+  useEffect(() => {
+    if (!stats.location || stats.location === "Unknown") return;
+    setVisitedLocations((prev) => {
+      const exists = prev.find((l) => l.name === stats.location);
+      if (exists) {
+        return prev.map((l) => ({ ...l, current: l.name === stats.location }));
+      }
+      // Place new location near the last one with some randomness
+      const last = prev[prev.length - 1];
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 28 + Math.random() * 20;
+      const x = last
+        ? Math.max(10, Math.min(90, last.x + Math.cos(angle) * dist))
+        : 50;
+      const y = last
+        ? Math.max(10, Math.min(90, last.y + Math.sin(angle) * dist))
+        : 50;
+      return [
+        ...prev.map((l) => ({ ...l, current: false })),
+        { name: stats.location, x, y, current: true },
+      ];
+    });
+  }, [stats.location]);
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -614,11 +644,13 @@ export default function DungeonMaster() {
     doc.save(`dungeon-master-chronicle-${Date.now()}.pdf`);
   };
 
+  // Step 5 — Save map in session
   const saveSession = (
     msgs: Message[],
     currentStats: Stats,
     currentWorld: string,
     currentImage: string | null,
+    locations: typeof visitedLocations,
   ) => {
     try {
       const session = {
@@ -626,6 +658,7 @@ export default function DungeonMaster() {
         stats: currentStats,
         world: currentWorld,
         sceneImage: currentImage,
+        visitedLocations: locations,
         savedAt: new Date().toISOString(),
       };
       localStorage.setItem("dungeon-master-session", JSON.stringify(session));
@@ -903,7 +936,6 @@ export default function DungeonMaster() {
     }
   };
 
-  // Step 2 — Add the dice roll function
   const rollD20 = () => {
     if (diceRolling) return;
     setDiceRolling(true);
@@ -967,7 +999,6 @@ export default function DungeonMaster() {
     const history = messages.slice(-12);
     setMessages((prev) => [...prev, { role: "player", text }]);
 
-    // Step 2: Added character to JSON stringify body
     const res = await fetch("/api/gemini-proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1040,7 +1071,8 @@ export default function DungeonMaster() {
                 playItemSound();
             }
             setMessages((prev) => {
-              saveSession(prev, stats, world, sceneImage);
+              // Step 5 — Save map in session
+              saveSession(prev, stats, world, sceneImage, visitedLocations);
               return prev;
             });
           }
@@ -1237,6 +1269,8 @@ export default function DungeonMaster() {
                   setCharacter(null);
                   setCharName("");
                   setCharClass("");
+                  // Step 4 — Reset map on new game
+                  setVisitedLocations([]);
                 }
               }}
               className="mic-btn"
@@ -1350,6 +1384,10 @@ export default function DungeonMaster() {
                                 setWorld(savedSession.world);
                                 setSceneImage(savedSession.sceneImage);
                                 setStarted(true);
+                                if (savedSession.visitedLocations)
+                                  setVisitedLocations(
+                                    savedSession.visitedLocations,
+                                  );
                                 setSavedSession(null);
                                 if (soundEnabled)
                                   playAmbient(savedSession.world);
@@ -2007,7 +2045,6 @@ export default function DungeonMaster() {
                     {isListening ? "🔴" : "🎤"}
                   </button>
 
-                  {/* Step 4 — Add dice button to input bar */}
                   <button
                     onClick={rollD20}
                     disabled={loading || diceRolling}
@@ -2183,6 +2220,206 @@ export default function DungeonMaster() {
                 className="scroll-area"
                 style={{ flex: 1, overflowY: "auto", padding: "16px" }}
               >
+                {/* Step 3 — Add the mini map component */}
+                {/* Mini Map */}
+                {visitedLocations.length > 0 && (
+                  <div style={{ marginBottom: "16px" }}>
+                    <span
+                      className="stat-label"
+                      style={{ display: "block", marginBottom: "8px" }}
+                    >
+                      ✦ REALM MAP
+                    </span>
+                    <div
+                      style={{
+                        position: "relative",
+                        width: "100%",
+                        height: "130px",
+                        background: "rgba(10,8,5,0.8)",
+                        border: "1px solid rgba(201,148,58,0.15)",
+                        borderRadius: "6px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {/* Grid lines */}
+                      <svg
+                        width="100%"
+                        height="100%"
+                        style={{ position: "absolute", inset: 0 }}
+                      >
+                        <defs>
+                          <pattern
+                            id="grid"
+                            width="20"
+                            height="20"
+                            patternUnits="userSpaceOnUse"
+                          >
+                            <path
+                              d="M 20 0 L 0 0 0 20"
+                              fill="none"
+                              stroke="rgba(201,148,58,0.05)"
+                              strokeWidth="0.5"
+                            />
+                          </pattern>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#grid)" />
+                        {/* Connection lines between locations */}
+                        {visitedLocations.map((loc, i) => {
+                          if (i === 0) return null;
+                          const prev = visitedLocations[i - 1];
+                          return (
+                            <line
+                              key={`line-${i}`}
+                              x1={`${prev.x}%`}
+                              y1={`${prev.y}%`}
+                              x2={`${loc.x}%`}
+                              y2={`${loc.y}%`}
+                              stroke="rgba(201,148,58,0.25)"
+                              strokeWidth="1"
+                              strokeDasharray="3,3"
+                            />
+                          );
+                        })}
+                        {/* Location nodes */}
+                        {visitedLocations.map((loc, i) => (
+                          <g key={`node-${i}`}>
+                            {/* Glow for current */}
+                            {loc.current && (
+                              <circle
+                                cx={`${loc.x}%`}
+                                cy={`${loc.y}%`}
+                                r="8"
+                                fill="rgba(201,148,58,0.15)"
+                              />
+                            )}
+                            {/* Node dot */}
+                            <circle
+                              cx={`${loc.x}%`}
+                              cy={`${loc.y}%`}
+                              r={loc.current ? "4" : "3"}
+                              fill={loc.current ? "#c9943a" : "#4a3520"}
+                              stroke={loc.current ? "#e8b96a" : "#7a5a22"}
+                              strokeWidth="1"
+                            />
+                            {/* Pulse ring for current location */}
+                            {loc.current && (
+                              <circle
+                                cx={`${loc.x}%`}
+                                cy={`${loc.y}%`}
+                                r="6"
+                                fill="none"
+                                stroke="rgba(201,148,58,0.5)"
+                                strokeWidth="1"
+                              >
+                                <animate
+                                  attributeName="r"
+                                  from="4"
+                                  to="10"
+                                  dur="2s"
+                                  repeatCount="indefinite"
+                                />
+                                <animate
+                                  attributeName="opacity"
+                                  from="0.8"
+                                  to="0"
+                                  dur="2s"
+                                  repeatCount="indefinite"
+                                />
+                              </circle>
+                            )}
+                          </g>
+                        ))}
+                      </svg>
+                      {/* Location labels */}
+                      {visitedLocations.map((loc, i) => {
+                        const shortName =
+                          loc.name.length > 14
+                            ? loc.name.slice(0, 12) + "…"
+                            : loc.name;
+                        const labelLeft = loc.x > 70 ? "auto" : `${loc.x}%`;
+                        const labelRight =
+                          loc.x > 70 ? `${100 - loc.x}%` : "auto";
+                        const labelTop = loc.y > 75 ? "auto" : `${loc.y + 6}%`;
+                        const labelBottom =
+                          loc.y > 75 ? `${100 - loc.y + 6}%` : "auto";
+                        return (
+                          <div
+                            key={`label-${i}`}
+                            style={{
+                              position: "absolute",
+                              left: labelLeft,
+                              right: labelRight,
+                              top: labelTop,
+                              bottom: labelBottom,
+                              transform:
+                                loc.x <= 70 ? "translateX(-50%)" : "none",
+                              fontFamily: "Cinzel, serif",
+                              fontSize: "7px",
+                              color: loc.current
+                                ? "var(--gold)"
+                                : "var(--text-dim)",
+                              letterSpacing: "0.05em",
+                              whiteSpace: "nowrap",
+                              pointerEvents: "none",
+                              textShadow: "0 0 6px rgba(0,0,0,0.8)",
+                              fontWeight: loc.current ? "600" : "400",
+                            }}
+                          >
+                            {shortName}
+                          </div>
+                        );
+                      })}
+                      {/* Legend */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: "4px",
+                          right: "6px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "4px",
+                            height: "4px",
+                            borderRadius: "50%",
+                            background: "var(--gold)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontFamily: "Cinzel, serif",
+                            fontSize: "7px",
+                            color: "var(--text-dim)",
+                            letterSpacing: "0.05em",
+                          }}
+                        >
+                          YOU
+                        </span>
+                      </div>
+                    </div>
+                    <p
+                      style={{
+                        fontFamily: "EB Garamond, serif",
+                        fontSize: "11px",
+                        color: "var(--text-dim)",
+                        fontStyle: "italic",
+                        marginTop: "4px",
+                        textAlign: "center",
+                      }}
+                    >
+                      {visitedLocations.length}{" "}
+                      {visitedLocations.length === 1 ? "location" : "locations"}{" "}
+                      discovered
+                    </p>
+                  </div>
+                )}
+                {visitedLocations.length > 0 && (
+                  <hr className="divider" style={{ marginBottom: "16px" }} />
+                )}
+
                 <div style={{ marginBottom: "16px" }}>
                   <div
                     style={{
@@ -2317,7 +2554,6 @@ export default function DungeonMaster() {
       {/* Hidden canvas */}
       <canvas ref={canvasRef} style={{ display: "none" }} />
 
-      {/* Step 5 — Add the dice display overlay */}
       {/* Dice Result Overlay */}
       {diceVisible && diceResult !== null && (
         <div
