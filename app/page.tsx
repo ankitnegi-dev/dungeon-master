@@ -40,6 +40,10 @@ export default function DungeonMaster() {
 
   const [soundEnabled, setSoundEnabled] = useState(false);
 
+  // Step 3 — Add welcome screen state
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [welcomeLine, setWelcomeLine] = useState(0);
+
   // Step 1 — Add dice state to page.tsx
   const [diceResult, setDiceResult] = useState<number | null>(null);
   const [diceRolling, setDiceRolling] = useState(false);
@@ -935,6 +939,51 @@ export default function DungeonMaster() {
       playAmbient(world);
     }
   };
+  const playWelcomeVoice = (currentWorld: string) => {
+    return new Promise<void>((resolve) => {
+      if (!("speechSynthesis" in window)) {
+        resolve();
+        return;
+      }
+
+      const scripts: Record<string, string> = {
+        fantasy:
+          "You have been chosen. The darkness has waited centuries for a soul like yours. Ancient evils stir beneath forgotten stones. Heroes have come before you... none have returned. Your story... begins... now.",
+        scifi:
+          "Signal detected. Consciousness acknowledged. The galaxy is vast, cold, and utterly indifferent to your survival. Empires have fallen waiting for someone like you. Your mission... begins... now.",
+        horror:
+          "I have watched you. For longer than you know. The walls between worlds grow thin. Something ancient has taken notice of your arrival. There is no turning back. Your descent... begins... now.",
+        samurai:
+          "The ancestors are watching. Your blade carries the weight of a thousand fallen warriors. Honor is a burden few survive. The path of the sword is written in blood. Your legend... begins... now.",
+      };
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(
+        scripts[currentWorld] || scripts.fantasy,
+      );
+
+      // Vecna-like voice settings — deep, slow, sinister
+      utterance.rate = 0.65;
+      utterance.pitch = 0.1;
+      utterance.volume = 1;
+
+      // Pick the deepest available voice
+      const voices = window.speechSynthesis.getVoices();
+      const deepVoice =
+        voices.find((v) => v.name.includes("Daniel")) ||
+        voices.find((v) => v.name.includes("David")) ||
+        voices.find((v) => v.name.includes("Male")) ||
+        voices.find((v) => v.name.toLowerCase().includes("deep")) ||
+        voices[0];
+
+      if (deepVoice) utterance.voice = deepVoice;
+
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+
+      window.speechSynthesis.speak(utterance);
+    });
+  };
 
   const rollD20 = () => {
     if (diceRolling) return;
@@ -1093,7 +1142,15 @@ export default function DungeonMaster() {
     setLoading(false);
   };
 
-  const startAdventure = () => {
+  const startAdventure = async () => {
+    setShowWelcome(true);
+    setWelcomeLine(0);
+
+    // Play the sinister welcome voice
+    await playWelcomeVoice(world);
+
+    // After voice finishes, hide welcome and start game
+    setShowWelcome(false);
     setStarted(true);
     if (soundEnabled) playAmbient(world);
     sendMessage("Begin the adventure.");
@@ -2665,6 +2722,112 @@ export default function DungeonMaster() {
                       : "FAILURE"}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Sinister Welcome Screen */}
+      {showWelcome && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            background: "rgba(0,0,0,0.97)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "32px",
+          }}
+        >
+          {/* Pulsing eye symbol */}
+          <div
+            style={{
+              fontSize: "80px",
+              filter: "drop-shadow(0 0 40px rgba(139,26,26,0.8))",
+              animation: "flicker 1s ease-in-out infinite",
+            }}
+          >
+            {world === "fantasy"
+              ? "👁"
+              : world === "scifi"
+                ? "🔮"
+                : world === "horror"
+                  ? "👁"
+                  : "⛩️"}
+          </div>
+
+          {/* Animated text reveal */}
+          <div
+            style={{
+              textAlign: "center",
+              maxWidth: "500px",
+              padding: "0 40px",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "Cinzel Decorative, serif",
+                fontSize: "13px",
+                color: "rgba(139,26,26,0.8)",
+                letterSpacing: "0.3em",
+                marginBottom: "24px",
+                animation: "fadeSlideUp 1s ease forwards",
+              }}
+            >
+              {world === "fantasy"
+                ? "THE DARKNESS SPEAKS"
+                : world === "scifi"
+                  ? "TRANSMISSION INCOMING"
+                  : world === "horror"
+                    ? "IT KNOWS YOU ARE HERE"
+                    : "THE ANCESTORS WHISPER"}
+            </p>
+
+            <p
+              style={{
+                fontFamily: "EB Garamond, serif",
+                fontSize: "20px",
+                color: "rgba(232,213,176,0.7)",
+                lineHeight: "2",
+                fontStyle: "italic",
+                letterSpacing: "0.05em",
+                animation: "fadeSlideUp 1.5s ease forwards",
+              }}
+            >
+              {world === "fantasy" &&
+                '"You have been chosen. The darkness has waited centuries for a soul like yours..."'}
+              {world === "scifi" &&
+                '"Signal detected. Consciousness acknowledged. The galaxy awaits..."'}
+              {world === "horror" &&
+                '"I have watched you. For longer than you know. There is no turning back..."'}
+              {world === "samurai" &&
+                '"The ancestors are watching. Your legend begins in blood..."'}
+            </p>
+          </div>
+
+          {/* Blood drip line */}
+          <div
+            style={{
+              width: "2px",
+              height: "60px",
+              background:
+                "linear-gradient(180deg, rgba(139,26,26,0.8), transparent)",
+              animation: "fadeSlideUp 2s ease forwards",
+            }}
+          />
+
+          <p
+            style={{
+              fontFamily: "Cinzel, serif",
+              fontSize: "10px",
+              color: "rgba(107,80,64,0.6)",
+              letterSpacing: "0.3em",
+              animation: "fadeSlideUp 2s ease forwards",
+            }}
+          >
+            YOUR STORY BEGINS...
+          </p>
         </div>
       )}
 
