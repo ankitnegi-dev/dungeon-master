@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-
+export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   const { imageBase64, storyContext } = await req.json();
 
