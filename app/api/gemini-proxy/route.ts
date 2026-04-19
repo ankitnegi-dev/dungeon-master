@@ -111,7 +111,14 @@ RULES:
 - scenePrompt: 1-2 sentences describing the visual scene for a painter
 - stats: Always track health/gold/location/inventory accurately
 - Never break character, never refuse player actions
-- NPCs have distinct voices`;
+- NPCs have distinct voices
+
+DICE SYSTEM: When you receive a [DICE ROLL] message, narrate the outcome dramatically based on the number:
+- 20 (CRITICAL HIT): Something extraordinarily good happens — maximum success with a bonus twist
+- 1 (CRITICAL FAIL): Something hilariously or dramatically bad happens — failure with consequences
+- 15-19 (SUCCESS): Clear success, player achieves their goal
+- 8-14 (PARTIAL): Mixed result — success with a complication or cost
+- 2-7 (FAILURE): The attempt fails, but move the story forward interestingly`;
 
   const worlds: Record<string, string> = {
     fantasy: `${base}${charInfo}\n\nWORLD: Dark Fantasy Medieval

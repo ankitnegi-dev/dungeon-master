@@ -39,6 +39,12 @@ export default function DungeonMaster() {
   });
 
   const [soundEnabled, setSoundEnabled] = useState(false);
+
+  // Step 1 — Add dice state to page.tsx
+  const [diceResult, setDiceResult] = useState<number | null>(null);
+  const [diceRolling, setDiceRolling] = useState(false);
+  const [diceVisible, setDiceVisible] = useState(false);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
   const ambientNodesRef = useRef<any[]>([]);
 
@@ -239,6 +245,30 @@ export default function DungeonMaster() {
       .camera-corner-tr { position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border-top: 2px solid var(--gold); border-right: 2px solid var(--gold); }
       .camera-corner-bl { position: absolute; bottom: 8px; left: 8px; width: 20px; height: 20px; border-bottom: 2px solid var(--gold); border-left: 2px solid var(--gold); }
       .camera-corner-br { position: absolute; bottom: 8px; right: 8px; width: 20px; height: 20px; border-bottom: 2px solid var(--gold); border-right: 2px solid var(--gold); }
+      
+      @keyframes diceShake {
+        0%, 100% { transform: rotate(0deg) scale(1); }
+        20% { transform: rotate(-15deg) scale(1.1); }
+        40% { transform: rotate(15deg) scale(1.15); }
+        60% { transform: rotate(-10deg) scale(1.1); }
+        80% { transform: rotate(10deg) scale(1.05); }
+      }
+      @keyframes diceAppear {
+        from { opacity: 0; transform: translateY(-20px) scale(0.8); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes criticalPulse {
+        0%, 100% { box-shadow: 0 0 20px rgba(201,148,58,0.4); }
+        50% { box-shadow: 0 0 60px rgba(201,148,58,0.9); }
+      }
+      @keyframes failPulse {
+        0%, 100% { box-shadow: 0 0 20px rgba(139,26,26,0.4); }
+        50% { box-shadow: 0 0 60px rgba(139,26,26,0.9); }
+      }
+      .dice-rolling { animation: diceShake 0.3s ease-in-out infinite; }
+      .dice-appear { animation: diceAppear 0.3s ease forwards; }
+      .dice-critical { animation: criticalPulse 0.5s ease-in-out infinite; }
+      .dice-fail { animation: failPulse 0.5s ease-in-out infinite; }
     `;
     document.head.appendChild(style);
     return () => {
@@ -871,6 +901,63 @@ export default function DungeonMaster() {
       setSoundEnabled(true);
       playAmbient(world);
     }
+  };
+
+  // Step 2 — Add the dice roll function
+  const rollD20 = () => {
+    if (diceRolling) return;
+    setDiceRolling(true);
+    setDiceVisible(true);
+    setDiceResult(null);
+    // Animate through random numbers
+    let rolls = 0;
+    const maxRolls = 15;
+    const interval = setInterval(() => {
+      setDiceResult(Math.floor(Math.random() * 20) + 1);
+      rolls++;
+      if (rolls >= maxRolls) {
+        clearInterval(interval);
+        const final = Math.floor(Math.random() * 20) + 1;
+        setDiceResult(final);
+        setDiceRolling(false);
+        // Play sound
+        if (soundEnabled) {
+          const ctx = initAudio();
+          [0, 0.05, 0.1, 0.15].forEach((delay) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "triangle";
+            osc.frequency.value = 300 + Math.random() * 400;
+            gain.gain.setValueAtTime(0.2, ctx.currentTime + delay);
+            gain.gain.exponentialRampToValueAtTime(
+              0.001,
+              ctx.currentTime + delay + 0.1,
+            );
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + delay);
+            osc.stop(ctx.currentTime + delay + 0.15);
+          });
+        }
+        // Auto-send the roll result to DM after 1.5 seconds
+        setTimeout(() => {
+          const outcome =
+            final === 20
+              ? "CRITICAL HIT"
+              : final === 1
+                ? "CRITICAL FAIL"
+                : final >= 15
+                  ? "SUCCESS"
+                  : final >= 8
+                    ? "PARTIAL SUCCESS"
+                    : "FAILURE";
+          sendMessage(
+            `[DICE ROLL] I rolled a D20 and got ${final}/20 — ${outcome}. Narrate the outcome of this roll in our current situation.`,
+          );
+          setTimeout(() => setDiceVisible(false), 3000);
+        }, 1500);
+      }
+    }, 80);
   };
 
   const sendMessage = async (text: string) => {
@@ -1919,6 +2006,25 @@ export default function DungeonMaster() {
                   >
                     {isListening ? "🔴" : "🎤"}
                   </button>
+
+                  {/* Step 4 — Add dice button to input bar */}
+                  <button
+                    onClick={rollD20}
+                    disabled={loading || diceRolling}
+                    className="act-btn"
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "6px",
+                      fontSize: "16px",
+                      border: "1px solid",
+                      letterSpacing: "0",
+                      minWidth: "44px",
+                    }}
+                    title="Roll D20 for combat or skill check"
+                  >
+                    🎲
+                  </button>
+
                   <button
                     onClick={cameraOpen ? closeCamera : openCamera}
                     disabled={loading || cameraCapturing}
@@ -2210,6 +2316,121 @@ export default function DungeonMaster() {
 
       {/* Hidden canvas */}
       <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {/* Step 5 — Add the dice display overlay */}
+      {/* Dice Result Overlay */}
+      {diceVisible && diceResult !== null && (
+        <div
+          style={{
+            position: "fixed",
+            top: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 40,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "8px",
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            className={`dice-appear ${diceRolling ? "dice-rolling" : diceResult === 20 ? "dice-critical" : diceResult === 1 ? "dice-fail" : ""}`}
+            style={{
+              width: "100px",
+              height: "100px",
+              background:
+                diceResult === 20
+                  ? "linear-gradient(135deg, #2a1a05, #3a2a08)"
+                  : diceResult === 1
+                    ? "linear-gradient(135deg, #1a0505, #2a0808)"
+                    : "linear-gradient(135deg, #1a1410, #221c15)",
+              border:
+                diceResult === 20
+                  ? "2px solid var(--gold)"
+                  : diceResult === 1
+                    ? "2px solid var(--blood)"
+                    : "1px solid var(--border)",
+              borderRadius: "12px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "4px",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.8)",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "Cinzel Decorative, serif",
+                fontSize: "36px",
+                fontWeight: "700",
+                color:
+                  diceResult === 20
+                    ? "var(--gold)"
+                    : diceResult === 1
+                      ? "#ef4444"
+                      : diceResult >= 15
+                        ? "#22c55e"
+                        : diceResult >= 8
+                          ? "#f59e0b"
+                          : "#ef4444",
+                lineHeight: 1,
+              }}
+            >
+              {diceResult}
+            </span>
+            <span
+              style={{
+                fontFamily: "Cinzel, serif",
+                fontSize: "9px",
+                letterSpacing: "0.1em",
+                color: "var(--text-dim)",
+              }}
+            >
+              D20
+            </span>
+          </div>
+          {!diceRolling && (
+            <div
+              style={{
+                background: "rgba(10,8,5,0.95)",
+                border:
+                  diceResult === 20
+                    ? "1px solid var(--gold)"
+                    : diceResult === 1
+                      ? "1px solid var(--blood)"
+                      : "1px solid var(--border)",
+                borderRadius: "6px",
+                padding: "6px 16px",
+                fontFamily: "Cinzel, serif",
+                fontSize: "11px",
+                letterSpacing: "0.12em",
+                color:
+                  diceResult === 20
+                    ? "var(--gold)"
+                    : diceResult === 1
+                      ? "#ef4444"
+                      : diceResult >= 15
+                        ? "#22c55e"
+                        : diceResult >= 8
+                          ? "#f59e0b"
+                          : "#ef4444",
+              }}
+            >
+              {diceResult === 20
+                ? "✦ CRITICAL HIT ✦"
+                : diceResult === 1
+                  ? "☠ CRITICAL FAIL ☠"
+                  : diceResult >= 15
+                    ? "SUCCESS"
+                    : diceResult >= 8
+                      ? "PARTIAL SUCCESS"
+                      : "FAILURE"}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Camera overlay */}
       {cameraOpen && (
