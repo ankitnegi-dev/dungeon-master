@@ -4,6 +4,9 @@ import Image from "next/image";
 import jsPDF from "jspdf";
 import type Pusher from "pusher-js";
 
+type SpeechRecognitionEvent = any;
+type SpeechRecognitionErrorEvent = any;
+
 type Stoppable = { stop: () => void };
 type Character = { name: string; characterClass: string };
 type Location = { name: string; x: number; y: number; current: boolean };
@@ -437,9 +440,18 @@ export default function DungeonMaster() {
         body: JSON.stringify({ scenePrompt: prompt }),
       });
       const data = await res.json();
-      if (data.image) setSceneImage(data.image);
-      else setImageLoading(false);
-    } catch {
+      if (data.image) {
+        setSceneImage(data.image);
+        if (data.isUrl) {
+          // URL image — onLoad handles setImageLoading(false)
+        } else {
+          // base64 image
+          setImageLoading(false);
+        }
+      } else {
+        setImageLoading(false);
+      }
+    } catch (e) {
       setImageLoading(false);
     }
   };
@@ -2553,7 +2565,14 @@ export default function DungeonMaster() {
                       filter: "sepia(20%) contrast(1.1)",
                     }}
                     onLoad={() => setImageLoading(false)}
-                    onError={() => setImageLoading(false)}
+                    onError={() => {
+                      // Retry once with different seed on error
+                      const newSeed = Math.floor(Math.random() * 99999);
+                      const currentSrc = sceneImage || '';
+                      const newSrc = currentSrc.replace(/seed=\d+/, `seed=${newSeed}`);
+                      if (newSrc !== currentSrc) setSceneImage(newSrc);
+                      else setImageLoading(false);
+                    }}
                   />
                 ) : !imageLoading ? (
                   <div

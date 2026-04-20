@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   const { world } = await req.json();
 
@@ -19,8 +21,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // "Clyde" voice — deep, raspy, villain-like. Free on ElevenLabs.
-    const voiceId = "2EiwWnXFnvU5JabPnv8n";
-
+    const voiceId = "pNInz6obpgDQGcFmaJgB";
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
@@ -45,7 +46,8 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const err = await response.text();
       console.log("ElevenLabs error:", err.slice(0, 200));
-      return Response.json({ error: "ElevenLabs failed" }, { status: 400 });
+      // Return fallback text instead of error
+      return Response.json({ text, audio: null }, { status: 200 });
     }
 
     const audioBuffer = await response.arrayBuffer();
@@ -55,6 +57,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.log("Voice error:", message);
-    return Response.json({ error: message }, { status: 500 });
+    // Return fallback text with no audio on network errors
+    return Response.json({ text, audio: null }, { status: 200 });
   }
 }
