@@ -4,8 +4,19 @@ import Image from "next/image";
 import jsPDF from "jspdf";
 import type Pusher from "pusher-js";
 
-type SpeechRecognitionEvent = any;
-type SpeechRecognitionErrorEvent = any;
+interface SpeechRecognitionResultItem {
+  transcript: string;
+  confidence: number;
+  isFinal: boolean;
+}
+
+type SpeechRecognitionEvent = Event & {
+  results: SpeechRecognitionResultItem[][];
+  isFinal?: boolean;
+};
+type SpeechRecognitionErrorEvent = Event & {
+  error: string;
+};
 
 type Stoppable = { stop: () => void };
 type Character = { name: string; characterClass: string };
@@ -441,17 +452,31 @@ export default function DungeonMaster() {
       });
       const data = await res.json();
       if (data.image) {
-        setSceneImage(data.image);
-        if (data.isUrl) {
-          // URL image — onLoad handles setImageLoading(false)
-        } else {
-          // base64 image
+        // Preload the image before setting state
+        const img = document.createElement('img');
+        img.onload = () => {
+          setSceneImage(data.image);
           setImageLoading(false);
-        }
+        };
+        img.onerror = () => {
+          // Retry with different seed
+          const newUrl = data.image.replace(
+            /seed=\d+/,
+            `seed=${Math.floor(Math.random() * 99999)}`,
+          );
+          const retryImg = document.createElement('img');
+          retryImg.onload = () => {
+            setSceneImage(newUrl);
+            setImageLoading(false);
+          };
+          retryImg.onerror = () => setImageLoading(false);
+          retryImg.src = newUrl;
+        };
+        img.src = data.image;
       } else {
         setImageLoading(false);
       }
-    } catch (e) {
+    } catch {
       setImageLoading(false);
     }
   };
@@ -2514,6 +2539,7 @@ export default function DungeonMaster() {
                   height: "180px",
                   background: "var(--parchment)",
                   flexShrink: 0,
+                  position: "relative",
                 }}
               >
                 {imageLoading && (
@@ -2555,13 +2581,9 @@ export default function DungeonMaster() {
                   <Image
                     src={sceneImage}
                     alt="Scene"
-                    width={400}
-                    height={300}
+                    fill
                     style={{
-                      width: "100%",
-                      height: "100%",
                       objectFit: "cover",
-                      display: imageLoading ? "none" : "block",
                       filter: "sepia(20%) contrast(1.1)",
                     }}
                     onLoad={() => setImageLoading(false)}
