@@ -1,11 +1,19 @@
 import { NextRequest } from "next/server";
 
+type HistoryItem = { role: "player" | "dm"; text: string };
+type ParsedResponse = {
+  narration?: string;
+  scenePrompt?: string;
+  stats?: Record<string, unknown>;
+};
+
 export async function POST(req: NextRequest) {
   const {
     message,
     history,
     world = "fantasy",
     character = null,
+    guestCharacter = null,
   } = await req.json();
 
   const encoder = new TextEncoder();
@@ -25,8 +33,11 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             model: "llama-3.3-70b-versatile",
             messages: [
-              { role: "system", content: getSystemPrompt(world, character) },
-              ...history.map((h: any) => ({
+              {
+                role: "system",
+                content: getSystemPrompt(world, character, guestCharacter),
+              },
+              ...history.map((h: HistoryItem) => ({
                 role: h.role === "dm" ? "assistant" : "user",
                 content: h.text,
               })),
@@ -52,7 +63,7 @@ export async function POST(req: NextRequest) {
       }
 
       const raw = data.choices?.[0]?.message?.content ?? "{}";
-      let parsed: any = {};
+      let parsed: ParsedResponse = {};
       try {
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
@@ -78,10 +89,11 @@ export async function POST(req: NextRequest) {
         ),
       );
       await writer.close();
-    } catch (err: any) {
-      console.log("Error:", err.message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.log("Error:", message);
       await writer.write(
-        encoder.encode(`data: ${JSON.stringify({ error: err.message })}\n\n`),
+        encoder.encode(`data: ${JSON.stringify({ error: message })}\n\n`),
       );
       await writer.close();
     }
@@ -96,9 +108,17 @@ export async function POST(req: NextRequest) {
   });
 }
 
-function getSystemPrompt(world: string, character: any = null): string {
+function getSystemPrompt(
+  world: string,
+  character: { name: string; characterClass: string } | null = null,
+  guestCharacter: { name: string; characterClass: string } | null = null,
+): string {
   const charInfo = character
-    ? `\nPLAYER CHARACTER: Name is "${character.name}", class is "${character.characterClass}". Always address them by name occasionally. Reference their class abilities naturally in the story — a Warrior gets combat advantages, a Mage can cast spells, a Rogue can pick locks and sneak, a Ranger has tracking and nature skills.`
+    ? `\nPLAYER 1: Name is "${character.name}", class is "${character.characterClass}". Reference their class abilities naturally in the story — a Warrior gets combat advantages, a Mage can cast spells, a Rogue can pick locks and sneak, a Ranger has tracking and nature skills.`
+    : "";
+
+  const guestInfo = guestCharacter
+    ? `\nPLAYER 2: Name is "${guestCharacter.name}", class is "${guestCharacter.characterClass}". Address both players in your narration. Both are present in every scene.`
     : "";
 
   const base = `You MUST respond with ONLY a valid JSON object. No markdown, no code blocks, no extra text. Just raw JSON.
@@ -121,24 +141,24 @@ DICE SYSTEM: When you receive a [DICE ROLL] message, narrate the outcome dramati
 - 2-7 (FAILURE): The attempt fails, but move the story forward interestingly`;
 
   const worlds: Record<string, string> = {
-    fantasy: `${base}${charInfo}\n\nWORLD: Dark Fantasy Medieval
+    fantasy: `${base}${charInfo}${guestInfo}\n\nWORLD: Dark Fantasy Medieval
 You are a dramatic Dungeon Master in a dark fantasy world of swords, sorcery, and ancient evil.
 Tone: gritty, atmospheric, Tolkien meets Game of Thrones.
 START: The Leering Gargoyle tavern at night. A hooded stranger slides a sealed letter bearing a raven skull crest across the table. health:100, gold:10, location:"The Leering Gargoyle", inventory:[]`,
 
-    scifi: `${base}${charInfo}\n\nWORLD: Sci-Fi Space Opera
+    scifi: `${base}${charInfo}${guestInfo}\n\nWORLD: Sci-Fi Space Opera
 You are an AI Game Master narrating a gritty sci-fi adventure across the galaxy.
 Tone: Blade Runner meets Mass Effect — neon, corporate dystopia, alien worlds.
 Use sci-fi terminology: credits instead of gold, hull integrity instead of health, ship manifest instead of inventory.
 START: A dimly lit space station bar called The Void Anchor. A mysterious figure in a worn pilot jacket slides an encrypted data chip across the counter. health:100, gold:500, location:"The Void Anchor, Kepler Station", inventory:[]`,
 
-    horror: `${base}${charInfo}\n\nWORLD: Cosmic Horror
+    horror: `${base}${charInfo}${guestInfo}\n\nWORLD: Cosmic Horror
 You are a sinister narrator in a Lovecraftian horror world where sanity frays and ancient things stir.
 Tone: oppressive dread, psychological horror, H.P. Lovecraft meets Stephen King.
 Add a sanity stat that decreases with disturbing discoveries. Gold becomes silver coins.
 START: A rain-lashed Victorian mansion at midnight. You have been hired to investigate disappearances. The butler who let you in has already vanished. health:100, gold:30, location:"Blackmoor Manor, East Wing", inventory:["Oil lantern","Investigator journal"]`,
 
-    samurai: `${base}${charInfo}\n\nWORLD: Feudal Japan — Samurai Era
+    samurai: `${base}${charInfo}${guestInfo}\n\nWORLD: Feudal Japan — Samurai Era
 You are a wise storyteller narrating a tale of honor, betrayal, and bushido in feudal Japan.
 Tone: poetic, honorable, brutal — Akira Kurosawa meets Ghost of Tsushima.
 Use Japanese terms naturally: ryo instead of gold, ki for health description.

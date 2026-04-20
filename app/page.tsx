@@ -1,6 +1,25 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import Image from "next/image";
 import jsPDF from "jspdf";
+import type Pusher from "pusher-js";
+
+type Stoppable = { stop: () => void };
+type Character = { name: string; characterClass: string };
+type Location = { name: string; x: number; y: number; current: boolean };
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  start(): void;
+  abort(): void;
+  stop(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+};
 
 type Message = { role: "player" | "dm"; text: string };
 type Stats = {
@@ -30,7 +49,7 @@ export default function DungeonMaster() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraCapturing, setCameraCapturing] = useState(false);
-  const [savedSession, setSavedSession] = useState<any>(null);
+  const [savedSession, setSavedSession] = useState<Record<string, unknown> | null>(null);
   const [stats, setStats] = useState<Stats>({
     health: 100,
     gold: 10,
@@ -40,22 +59,31 @@ export default function DungeonMaster() {
 
   const [soundEnabled, setSoundEnabled] = useState(false);
 
-  // Step 3 — Add welcome screen state
+  // Welcome screen state
   const [showWelcome, setShowWelcome] = useState(false);
-  const [welcomeLine, setWelcomeLine] = useState(0);
 
-  // Step 1 — Add dice state to page.tsx
+  // Dice state
   const [diceResult, setDiceResult] = useState<number | null>(null);
   const [diceRolling, setDiceRolling] = useState(false);
   const [diceVisible, setDiceVisible] = useState(false);
 
-  // Step 1 — Add map state
+  // Map state
   const [visitedLocations, setVisitedLocations] = useState<
     { name: string; x: number; y: number; current: boolean }[]
   >([]);
 
+  // Step 6: Multiplayer states
+  const [multiMode, setMultiMode] = useState<'solo' | 'host' | 'guest'>('solo');
+  const [roomCode, setRoomCode] = useState('');
+  const [roomInput, setRoomInput] = useState('');
+  const [guestCharacter, setGuestCharacter] = useState<Character | null>(null);
+  const [multiError, setMultiError] = useState('');
+  const [waitingForGuest, setWaitingForGuest] = useState(false);
+  const pusherRef = useRef<InstanceType<typeof Pusher> | null>(null);
+  const channelRef = useRef<ReturnType<InstanceType<typeof Pusher>['subscribe']> | null>(null);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const ambientNodesRef = useRef<any[]>([]);
+  const ambientNodesRef = useRef<(AudioNode | Stoppable)[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const listeningRef = useRef(false);
@@ -73,7 +101,7 @@ export default function DungeonMaster() {
     }
   }, []);
 
-  // Step 2 — Auto-update map when location changes
+  // Auto-update map when location changes
   useEffect(() => {
     if (!stats.location || stats.location === "Unknown") return;
     setVisitedLocations((prev) => {
@@ -310,6 +338,94 @@ export default function DungeonMaster() {
     };
   }, []);
 
+  // Step 7: Pusher connection function
+  const connectToPusher = (code: string, isHost: boolean) => {
+    import('pusher-js').then((PusherJS) => {
+      const Pusher = PusherJS.default;
+      pusherRef.current = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+      });
+      channelRef.current = pusherRef.current.subscribe(`room-${code}`);
+      
+      if (!isHost) {
+        // Guest listens for story updates from host
+        channelRef.current.bind('story-update', (data: Record<string, unknown>) => {
+          if (data.messages && Array.isArray(data.messages)) setMessages(data.messages as Message[]);
+          if (data.stats && typeof data.stats === 'object') setStats(data.stats as Stats);
+          if (typeof data.sceneImage === 'string' || data.sceneImage === null) setSceneImage(data.sceneImage);
+          if (Array.isArray(data.visitedLocations)) setVisitedLocations(data.visitedLocations as Location[]);
+          if (typeof data.loading === 'boolean') setLoading(data.loading);
+        });
+      }
+      
+      // Both listen for guest joining
+      channelRef.current.bind('guest-joined', (data: Record<string, unknown>) => {
+        if (typeof data.character === 'object' && data.character) setGuestCharacter(data.character as Character);
+        setWaitingForGuest(false);
+      });
+      
+      // Both listen for player actions
+      channelRef.current.bind('player-action', (data: Record<string, unknown>) => {
+        if (data.from !== (isHost ? 'host' : 'guest')) {
+          const characterName = typeof data.characterName === 'string' ? data.characterName : '';
+          const action = typeof data.action === 'string' ? data.action : '';
+          sendMessage(`[${characterName} acts]: ${action}`, true);
+        }
+      });
+    });
+  };
+
+  // Step 8: Host/Join functions
+  const createRoom = async () => {
+    if (!character || !world) return;
+    const res = await fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', character, world }),
+    });
+    const data = await res.json();
+    if (data.roomCode) {
+      setRoomCode(data.roomCode);
+      setMultiMode('host');
+      setWaitingForGuest(true);
+      connectToPusher(data.roomCode, true);
+    }
+  };
+
+  const joinRoom = async () => {
+    if (!roomInput.trim() || !character) return;
+    setMultiError('');
+    const res = await fetch('/api/room', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'join', roomCode: roomInput.toUpperCase(), character }),
+    });
+    const data = await res.json();
+    if (data.error) { setMultiError(data.error); return; }
+    setRoomCode(roomInput.toUpperCase());
+    setMultiMode('guest');
+    setWorld(data.room.world);
+    setGuestCharacter(data.room.hostCharacter);
+    connectToPusher(roomInput.toUpperCase(), false);
+    
+    // Notify host
+    await fetch('/api/pusher', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomCode: roomInput.toUpperCase(),
+        event: 'guest-joined',
+        data: { character },
+      }),
+    });
+    
+    // Sync existing game state
+    setMessages(data.room.messages || []);
+    setStats(data.room.stats || { health: 100, gold: 10, location: 'Unknown', inventory: [] });
+    if (data.room.sceneImage) setSceneImage(data.room.sceneImage);
+    setStarted(true);
+  };
+
   const generateScene = async (prompt: string) => {
     if (!prompt) return;
     setImageLoading(true);
@@ -323,7 +439,7 @@ export default function DungeonMaster() {
       const data = await res.json();
       if (data.image) setSceneImage(data.image);
       else setImageLoading(false);
-    } catch (e) {
+    } catch {
       setImageLoading(false);
     }
   };
@@ -356,9 +472,11 @@ export default function DungeonMaster() {
       return;
     }
     const SR =
-      (window as any).webkitSpeechRecognition ||
-      (window as any).SpeechRecognition;
-    const recognition = new SR();
+      ((window as unknown as Record<string, unknown>).webkitSpeechRecognition ||
+      (window as unknown as Record<string, unknown>).SpeechRecognition) as unknown as {
+        new (): unknown;
+      };
+    const recognition = new SR() as unknown as SpeechRecognitionLike;
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = "en-US";
@@ -367,7 +485,7 @@ export default function DungeonMaster() {
     setIsListening(true);
     let submitted = false;
     recognition.start();
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       if (submitted) return;
       submitted = true;
       const transcript = event.results[0][0].transcript;
@@ -376,7 +494,7 @@ export default function DungeonMaster() {
       setIsListening(false);
       sendMessage(transcript);
     };
-    recognition.onerror = (e: any) => {
+    recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
       console.log("Speech error:", e.error);
       listeningRef.current = false;
       setIsListening(false);
@@ -407,7 +525,7 @@ export default function DungeonMaster() {
           videoRef.current.play();
         }
       }, 100);
-    } catch (err) {
+    } catch {
       alert("Camera access denied. Please allow camera permissions.");
     }
   };
@@ -518,7 +636,7 @@ export default function DungeonMaster() {
         doc.setDrawColor(201, 148, 58);
         doc.setLineWidth(0.3);
         doc.rect(margin + 10, 150, contentW - 20, 80);
-      } catch (e) {}
+      } catch {}
     }
 
     // Stats summary on cover
@@ -549,7 +667,7 @@ export default function DungeonMaster() {
 
     // ── Story pages ──
     const dmMessages = messages.filter(
-      (m: any) => m.role === "dm" && m.text && m.text.length > 10,
+      (m) => m.role === "dm" && m.text && m.text.length > 10,
     );
 
     let currentY = margin + 10;
@@ -589,7 +707,7 @@ export default function DungeonMaster() {
     doc.line(margin + 20, currentY, pageW - margin - 20, currentY);
     currentY += 14;
 
-    dmMessages.forEach((msg: any, idx: number) => {
+    dmMessages.forEach((msg, idx: number) => {
       // Drop cap style chapter marker
       if (currentY > pageH - margin - 30) addNewPage();
 
@@ -648,7 +766,6 @@ export default function DungeonMaster() {
     doc.save(`dungeon-master-chronicle-${Date.now()}.pdf`);
   };
 
-  // Step 5 — Save map in session
   const saveSession = (
     msgs: Message[],
     currentStats: Stats,
@@ -676,7 +793,7 @@ export default function DungeonMaster() {
       const raw = localStorage.getItem("dungeon-master-session");
       if (!raw) return null;
       return JSON.parse(raw);
-    } catch (e) {
+    } catch {
       return null;
     }
   };
@@ -687,9 +804,8 @@ export default function DungeonMaster() {
 
   const initAudio = () => {
     if (!audioCtxRef.current) {
-      audioCtxRef.current = new (
-        window.AudioContext || (window as any).webkitAudioContext
-      )();
+      const AudioContextClass = (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || AudioContext;
+      audioCtxRef.current = new AudioContextClass();
     }
     return audioCtxRef.current;
   };
@@ -697,8 +813,10 @@ export default function DungeonMaster() {
   const stopAmbient = () => {
     ambientNodesRef.current.forEach((node) => {
       try {
-        node.stop();
-      } catch (e) {}
+        if ('stop' in node && typeof (node as Stoppable).stop === 'function') {
+          (node as Stoppable).stop();
+        }
+      } catch {}
     });
     ambientNodesRef.current = [];
   };
@@ -939,48 +1057,105 @@ export default function DungeonMaster() {
       playAmbient(world);
     }
   };
-  const playWelcomeVoice = (currentWorld: string) => {
-    return new Promise<void>((resolve) => {
-      if (!("speechSynthesis" in window)) {
-        resolve();
-        return;
+  
+  const playWelcomeVoice = (currentWorld: string): Promise<void> => {
+    return new Promise(async (resolve) => {
+      try {
+        // Try ElevenLabs first
+        const res = await fetch('/api/welcome-voice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ world: currentWorld }),
+        });
+
+        const data = await res.json();
+
+        if (data.audio) {
+          // Play the ElevenLabs audio
+          const audioData = atob(data.audio);
+          const audioArray = new Uint8Array(audioData.length);
+          for (let i = 0; i < audioData.length; i++) {
+            audioArray[i] = audioData.charCodeAt(i);
+          }
+          const blob = new Blob([audioArray], { type: 'audio/mpeg' });
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+
+          // Apply extra reverb/echo via Web Audio for that cave-like villain effect
+          const AudioContextClass = (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || AudioContext;
+          const audioCtx = new AudioContextClass() as AudioContext;
+          const source = audioCtx.createMediaElementSource(audio);
+
+          // Convolver for reverb
+          const convolver = audioCtx.createConvolver();
+          const reverbBuffer = audioCtx.createBuffer(2, audioCtx.sampleRate * 3, audioCtx.sampleRate);
+          for (let ch = 0; ch < 2; ch++) {
+            const data = reverbBuffer.getChannelData(ch);
+            for (let i = 0; i < data.length; i++) {
+              data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+            }
+          }
+          convolver.buffer = reverbBuffer;
+
+          // Low-pass filter to make it deeper
+          const filter = audioCtx.createBiquadFilter();
+          filter.type = 'lowshelf';
+          filter.frequency.value = 300;
+          filter.gain.value = 12;
+
+          // Gain
+          const gainNode = audioCtx.createGain();
+          gainNode.gain.value = 1.2;
+
+          // Connect: source → filter → convolver → gain → output
+          source.connect(filter);
+          filter.connect(convolver);
+          convolver.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+
+          // Also connect dry signal
+          source.connect(gainNode);
+
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+          audio.onerror = () => resolve();
+          audio.play();
+          return;
+        }
+      } catch {
+        console.log('ElevenLabs fallback to Web Speech');
       }
 
+      // Fallback to Web Speech API if ElevenLabs fails
+      if (!('speechSynthesis' in window)) { resolve(); return; }
+
       const scripts: Record<string, string> = {
-        fantasy:
-          "You have been chosen. The darkness has waited centuries for a soul like yours. Ancient evils stir beneath forgotten stones. Heroes have come before you... none have returned. Your story... begins... now.",
-        scifi:
-          "Signal detected. Consciousness acknowledged. The galaxy is vast, cold, and utterly indifferent to your survival. Empires have fallen waiting for someone like you. Your mission... begins... now.",
-        horror:
-          "I have watched you. For longer than you know. The walls between worlds grow thin. Something ancient has taken notice of your arrival. There is no turning back. Your descent... begins... now.",
-        samurai:
-          "The ancestors are watching. Your blade carries the weight of a thousand fallen warriors. Honor is a burden few survive. The path of the sword is written in blood. Your legend... begins... now.",
+        fantasy: "You have been chosen. The darkness has waited centuries for a soul like yours. Your story... begins... now.",
+        scifi: "Signal detected. Consciousness acknowledged. Your mission... begins... now.",
+        horror: "I have watched you. For longer than you know. Your descent... begins... now.",
+        samurai: "The ancestors are watching. Your legend... begins... now.",
       };
 
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(
-        scripts[currentWorld] || scripts.fantasy,
+        scripts[currentWorld] || scripts.fantasy
       );
-
-      // Vecna-like voice settings — deep, slow, sinister
-      utterance.rate = 0.65;
-      utterance.pitch = 0.1;
+      utterance.rate = 0.6;
+      utterance.pitch = 0.0;
       utterance.volume = 1;
 
-      // Pick the deepest available voice
       const voices = window.speechSynthesis.getVoices();
       const deepVoice =
-        voices.find((v) => v.name.includes("Daniel")) ||
-        voices.find((v) => v.name.includes("David")) ||
-        voices.find((v) => v.name.includes("Male")) ||
-        voices.find((v) => v.name.toLowerCase().includes("deep")) ||
+        voices.find(v => v.name.includes('Daniel')) ||
+        voices.find(v => v.name.includes('David')) ||
+        voices.find(v => v.name.includes('Male')) ||
         voices[0];
-
       if (deepVoice) utterance.voice = deepVoice;
 
       utterance.onend = () => resolve();
       utterance.onerror = () => resolve();
-
       window.speechSynthesis.speak(utterance);
     });
   };
@@ -1041,17 +1216,38 @@ export default function DungeonMaster() {
     }, 80);
   };
 
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || loading) return;
+  // Step 9 & 11: Updated sendMessage fetch body and Pusher broadcast
+  const sendMessage = async (text: string | ((prev: string) => string), isActionFromGuest = false) => {
+    const finalMessage = typeof text === "function" ? text("") : text;
+    if (!finalMessage.trim() || loading) return;
+    
     setInput("");
     setLoading(true);
     const history = messages.slice(-12);
-    setMessages((prev) => [...prev, { role: "player", text }]);
+    setMessages((prev) => [...prev, { role: "player", text: finalMessage }]);
+
+    // Notify other player if needed and not already an action from guest
+    if (multiMode === 'guest' && channelRef.current && !isActionFromGuest) {
+      fetch('/api/pusher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomCode,
+          event: 'player-action',
+          data: {
+            from: 'guest',
+            characterName: character?.name,
+            action: finalMessage
+          }
+        })
+      });
+    }
 
     const res = await fetch("/api/gemini-proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, history, world, character }),
+      // Step 11: Include guestCharacter
+      body: JSON.stringify({ message: finalMessage, history, world, character, guestCharacter }),
     });
 
     const reader = res.body!.getReader();
@@ -1122,6 +1318,26 @@ export default function DungeonMaster() {
             setMessages((prev) => {
               // Step 5 — Save map in session
               saveSession(prev, stats, world, sceneImage, visitedLocations);
+              
+              // Step 9: Broadcast to guest if host
+              if (multiMode === 'host' && channelRef.current) {
+                fetch('/api/pusher', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    roomCode,
+                    event: 'story-update',
+                    data: {
+                      messages: prev,
+                      stats,
+                      sceneImage,
+                      visitedLocations,
+                      loading: false,
+                    },
+                  }),
+                });
+              }
+              
               return prev;
             });
           }
@@ -1136,7 +1352,7 @@ export default function DungeonMaster() {
             });
             setLoading(false);
           }
-        } catch (e) {}
+        } catch {}
       }
     }
     setLoading(false);
@@ -1144,7 +1360,6 @@ export default function DungeonMaster() {
 
   const startAdventure = async () => {
     setShowWelcome(true);
-    setWelcomeLine(0);
 
     // Play the sinister welcome voice
     await playWelcomeVoice(world);
@@ -1229,6 +1444,7 @@ export default function DungeonMaster() {
                 background: "var(--border)",
               }}
             />
+            {/* Step 13: Show companion in header */}
             <span
               style={{
                 fontSize: "11px",
@@ -1237,8 +1453,9 @@ export default function DungeonMaster() {
                 letterSpacing: "0.08em",
               }}
             >
-              {character ? `${character.name} · ` : ""}
-              {stats.location}
+              {character ? `${character.name}` : ''}
+              {guestCharacter ? ` & ${guestCharacter.name}` : ''}
+              {stats.location ? ` · ${stats.location}` : ''}
             </span>
           </div>
           {started && messages.length > 0 && (
@@ -1412,15 +1629,15 @@ export default function DungeonMaster() {
                               fontStyle: "italic",
                             }}
                           >
-                            {savedSession.world === "fantasy"
+                            {(savedSession.world as string) === "fantasy"
                               ? "⚔️ Dark Fantasy"
-                              : savedSession.world === "scifi"
+                              : (savedSession.world as string) === "scifi"
                                 ? "🚀 Space Opera"
-                                : savedSession.world === "horror"
+                                : (savedSession.world as string) === "horror"
                                   ? "🕯️ Cosmic Horror"
                                   : "🗡️ Feudal Japan"}
                             {" · "}
-                            {savedSession.stats?.location}
+                            {(savedSession.stats as { location?: string })?.location}
                           </p>
                           <p
                             style={{
@@ -1430,24 +1647,24 @@ export default function DungeonMaster() {
                               marginBottom: "12px",
                             }}
                           >
-                            {savedSession.messages?.length} exchanges · Saved{" "}
-                            {new Date(savedSession.savedAt).toLocaleString()}
+                            {((savedSession.messages as unknown[]) || []).length} exchanges · Saved{" "}
+                            {new Date(savedSession.savedAt as string | number).toLocaleString()}
                           </p>
                           <div style={{ display: "flex", gap: "8px" }}>
                             <button
                               onClick={() => {
-                                setMessages(savedSession.messages);
-                                setStats(savedSession.stats);
-                                setWorld(savedSession.world);
-                                setSceneImage(savedSession.sceneImage);
+                                setMessages(savedSession.messages as Message[]);
+                                setStats(savedSession.stats as Stats);
+                                setWorld(savedSession.world as string);
+                                setSceneImage(savedSession.sceneImage as string | null);
                                 setStarted(true);
                                 if (savedSession.visitedLocations)
                                   setVisitedLocations(
-                                    savedSession.visitedLocations,
+                                    savedSession.visitedLocations as { name: string; x: number; y: number; current: boolean }[],
                                   );
                                 setSavedSession(null);
                                 if (soundEnabled)
-                                  playAmbient(savedSession.world);
+                                  playAmbient(savedSession.world as string);
                               }}
                               className="act-btn"
                               style={{
@@ -1947,6 +2164,95 @@ export default function DungeonMaster() {
                             `The ${character?.characterClass}'s journey begins at moonrise.`}
                         </p>
                       </div>
+
+                      {/* Step 12: Multiplayer UI added here above the buttons */}
+                      <div style={{ width: "100%", maxWidth: "400px" }}>
+                        <p style={{ fontFamily: "Cinzel, serif", fontSize: "10px", color: "var(--gold-dim)", letterSpacing: "0.15em", marginBottom: "10px", textAlign: "center" }}>
+                          ADVENTURE MODE
+                        </p>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+                          <button
+                            onClick={createRoom}
+                            className="act-btn"
+                            style={{ padding: "10px", borderRadius: "6px", fontSize: "11px", letterSpacing: "0.1em" }}
+                          >
+                            ⚔️ HOST GAME
+                          </button>
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            <input
+                              type="text"
+                              value={roomInput}
+                              onChange={e => setRoomInput(e.target.value.toUpperCase())}
+                              placeholder="ROOM CODE"
+                              maxLength={6}
+                              className="input-field"
+                              style={{ flex: 1, padding: "10px", borderRadius: "6px", fontSize: "12px", textAlign: "center", letterSpacing: "0.15em" }}
+                            />
+                            <button
+                              onClick={joinRoom}
+                              className="mic-btn"
+                              style={{ padding: "10px 12px", borderRadius: "6px", fontSize: "11px", border: "1px solid", whiteSpace: "nowrap" }}
+                            >
+                              JOIN
+                            </button>
+                          </div>
+                        </div>
+                        {roomCode && waitingForGuest && (
+                          <div style={{
+                            background: "rgba(201,148,58,0.08)",
+                            border: "1px solid rgba(201,148,58,0.3)",
+                            borderRadius: "6px",
+                            padding: "12px",
+                            textAlign: "center",
+                            marginBottom: "12px",
+                          }}>
+                            <p style={{ fontFamily: "Cinzel, serif", fontSize: "10px", color: "var(--text-dim)", letterSpacing: "0.12em", marginBottom: "6px" }}>
+                              SHARE THIS CODE WITH YOUR COMPANION
+                            </p>
+                            <p style={{ fontFamily: "Cinzel Decorative, serif", fontSize: "28px", color: "var(--gold)", letterSpacing: "0.2em" }}>
+                              {roomCode}
+                            </p>
+                            <p style={{ fontFamily: "EB Garamond, serif", fontSize: "12px", color: "var(--text-dim)", fontStyle: "italic", marginTop: "4px" }}>
+                              Waiting for companion to join...
+                            </p>
+                            <div style={{ display: "flex", justifyContent: "center", gap: "4px", marginTop: "8px" }}>
+                              {[0,1,2].map(i => (
+                                <div key={i} style={{
+                                  width: "6px", height: "6px", borderRadius: "50%",
+                                  background: "var(--gold-dim)",
+                                  animation: `fadeSlideUp 0.6s ease-in-out ${i * 0.2}s infinite alternate`,
+                                }} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {guestCharacter && (
+                          <div style={{
+                            background: "rgba(201,148,58,0.05)",
+                            border: "1px solid rgba(201,148,58,0.2)",
+                            borderRadius: "6px",
+                            padding: "10px",
+                            textAlign: "center",
+                            marginBottom: "12px",
+                          }}>
+                            <p style={{ fontFamily: "Cinzel, serif", fontSize: "10px", color: "var(--gold-dim)", letterSpacing: "0.1em", marginBottom: "4px" }}>
+                              COMPANION JOINED
+                            </p>
+                            <p style={{ fontFamily: "EB Garamond, serif", fontSize: "14px", color: "var(--text-primary)" }}>
+                              {guestCharacter.name} · {guestCharacter.characterClass}
+                            </p>
+                          </div>
+                        )}
+                        {multiError && (
+                          <p style={{ fontFamily: "EB Garamond, serif", fontSize: "13px", color: "#ef4444", textAlign: "center", fontStyle: "italic" }}>
+                            {multiError}
+                          </p>
+                        )}
+                        <p style={{ fontFamily: "EB Garamond, serif", fontSize: "12px", color: "var(--text-dim)", textAlign: "center", fontStyle: "italic" }}>
+                          Or play solo below
+                        </p>
+                      </div>
+
                       <div style={{ display: "flex", gap: "12px" }}>
                         <button
                           onClick={startAdventure}
@@ -2234,9 +2540,11 @@ export default function DungeonMaster() {
                   </div>
                 )}
                 {sceneImage ? (
-                  <img
+                  <Image
                     src={sceneImage}
                     alt="Scene"
+                    width={400}
+                    height={300}
                     style={{
                       width: "100%",
                       height: "100%",
@@ -2573,7 +2881,7 @@ export default function DungeonMaster() {
                         gap: "6px",
                       }}
                     >
-                      {stats.inventory.map((item, i) => (
+                      {stats.inventory.map((item: string, i: number) => (
                         <div
                           key={i}
                           className="inv-item"
