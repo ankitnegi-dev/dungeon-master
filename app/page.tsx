@@ -143,7 +143,6 @@ export default function DungeonMaster() {
   useEffect(() => {
     const style = document.createElement("style");
     style.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
       * { box-sizing: border-box; margin: 0; padding: 0; }
       :root {
         --ink: #0a0805;
@@ -345,6 +344,34 @@ export default function DungeonMaster() {
       .dice-appear { animation: diceAppear 0.3s ease forwards; }
       .dice-critical { animation: criticalPulse 0.5s ease-in-out infinite; }
       .dice-fail { animation: failPulse 0.5s ease-in-out infinite; }
+
+      /* ── Mobile Responsiveness ── */
+      @media (max-width: 768px) {
+        .grimoire-bg { min-height: 100dvh; }
+
+        /* Hide realm map on mobile to save space */
+        .mobile-hide { display: none !important; }
+
+        /* Full width chat on mobile */
+        .mobile-full { width: 100% !important; }
+
+        /* Smaller title */
+        .font-display { font-size: 14px !important; }
+
+        /* Compact bubbles */
+        .dm-bubble, .player-bubble { font-size: 14px !important; line-height: 1.7 !important; }
+
+        /* Compact input */
+        .input-field { font-size: 14px !important; }
+      }
+
+      @media (max-width: 640px) {
+        .desktop-panel { display: none !important; }
+        .mobile-stats-bar { display: flex !important; }
+      }
+      @media (min-width: 641px) {
+        .mobile-stats-bar { display: none !important; }
+      }
     `;
     document.head.appendChild(style);
     return () => {
@@ -1462,6 +1489,7 @@ export default function DungeonMaster() {
               display: "flex",
               alignItems: "center",
               gap: "8px",
+              flexWrap: "wrap",
             }}
           >
             <span
@@ -1488,6 +1516,7 @@ export default function DungeonMaster() {
                 color: "var(--gold-dim)",
                 fontFamily: "Cinzel, serif",
                 letterSpacing: "0.08em",
+                display: "var(--location-display, inline)",
               }}
             >
               {character ? `${character.name}` : ''}
@@ -2419,6 +2448,45 @@ export default function DungeonMaster() {
               <div ref={bottomRef} />
             </div>
 
+            {/* Mobile stats bar — shows on phones */}
+            {started && (
+              <div className="mobile-stats-bar" style={{
+                borderTop: "1px solid rgba(201,148,58,0.15)",
+                padding: "8px 12px",
+                gap: "12px",
+                alignItems: "center",
+                background: "rgba(10,8,5,0.9)",
+                overflowX: "auto",
+                flexShrink: 0,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "Cinzel, serif", fontSize: "9px", color: "var(--gold-dim)", letterSpacing: "0.1em" }}>HP</span>
+                  <div style={{ width: "60px", height: "3px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${stats.health}%`, background: healthColor, borderRadius: "2px" }} />
+                  </div>
+                  <span style={{ fontFamily: "Cinzel, serif", fontSize: "10px", color: healthColor }}>{stats.health}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "Cinzel, serif", fontSize: "9px", color: "var(--gold-dim)", letterSpacing: "0.1em" }}>GOLD</span>
+                  <span style={{ fontFamily: "Cinzel, serif", fontSize: "12px", color: "var(--gold)" }}>{stats.gold}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "Cinzel, serif", fontSize: "9px", color: "var(--gold-dim)", letterSpacing: "0.1em" }}>📍</span>
+                  <span style={{ fontFamily: "EB Garamond, serif", fontSize: "12px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{stats.location}</span>
+                </div>
+                {sceneImage && (
+                  <Image
+                    src={sceneImage}
+                    alt="Scene"
+                    width={48}
+                    height={32}
+                    unoptimized
+                    style={{ objectFit: "cover", borderRadius: "3px", border: "1px solid rgba(201,148,58,0.3)", marginLeft: "auto", flexShrink: 0 }}
+                  />
+                )}
+              </div>
+            )}
+
             {/* Input */}
             {started && (
               <div
@@ -2523,8 +2591,9 @@ export default function DungeonMaster() {
           {/* Right: Scene + Stats */}
           {started && (
             <div
+              className="desktop-panel"
               style={{
-                width: "280px",
+                width: "clamp(200px, 28vw, 280px)",
                 borderLeft: "1px solid rgba(201,148,58,0.12)",
                 display: "flex",
                 flexDirection: "column",
